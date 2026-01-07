@@ -17,7 +17,7 @@ if (!isset($_SESSION['user_id'])) {
 
 <!-- NAVBAR -->
 <nav class="navbar bg-primary text-white px-3 d-flex justify-content-between">
-  <span class="fw-semibold">Simple POS</span>
+  <span class="fw-semibold">Dolores POS</span>
   <div>
     <a href="admin/products.php" class="btn btn-warning btn-sm me-2">Admin</a>
     <a href="reports/analytics.php" class="btn btn-success btn-sm me-2">Reports</a>
