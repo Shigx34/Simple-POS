@@ -15,7 +15,6 @@ if (!isset($_SESSION['user_id'])) {
 </head>
 <body class="bg-light">
 
-<!-- NAVBAR -->
 <nav class="navbar bg-primary text-white px-3 d-flex justify-content-between">
   <span class="fw-semibold">Dolores POS</span>
   <div>
@@ -28,14 +27,12 @@ if (!isset($_SESSION['user_id'])) {
 <div class="container-fluid mt-3">
 <div class="row">
 
-<!-- LEFT -->
 <div class="col-md-4 mb-3">
   <button class="btn btn-primary w-100 mb-2" onclick="startScanner()">📷 Scan Barcode</button>
   <button class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#addModal">➕ Add Item</button>
   <div id="reader" class="mt-2"></div>
 </div>
 
-<!-- RIGHT -->
 <div class="col-md-8">
   <table class="table table-bordered bg-white">
     <thead class="table-light">
@@ -76,29 +73,22 @@ if (!isset($_SESSION['user_id'])) {
   </div>
 </div>
 
-<!-- PAYMENT SUCCESS MODAL -->
-<div class="modal fade" id="paymentToast" tabindex="-1">
+<!-- PAYMENT MODAL -->
+<div class="modal fade" id="paymentToast">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-success">
       <div class="modal-header bg-success text-white">
         <h5 class="modal-title">Payment Done</h5>
         <button type="button" class="btn-close btn-close-white" onclick="closePaymentToast()"></button>
       </div>
-
       <div class="modal-body text-center">
         <h6>Total</h6>
         <h4>₱<span id="toast_total"></span></h4>
-
         <h6 class="mt-3">Tendered</h6>
         <h4>₱<span id="toast_cash"></span></h4>
-
         <h6 class="mt-3">Change</h6>
         <h2 class="text-success">₱<span id="toast_change"></span></h2>
-
-        <hr>
-        <strong class="text-success">✔ Payment Completed</strong>
       </div>
-
       <div class="modal-footer">
         <button class="btn btn-success w-100" onclick="closePaymentToast()">Close</button>
       </div>
@@ -109,18 +99,18 @@ if (!isset($_SESSION['user_id'])) {
 <script>
 let cart = [];
 let scannerInstance = null;
+let scanLock = false;
 
-/* ===== BEEP SOUND ===== */
+const cartEl = document.getElementById("cart");
+
+/* BEEP */
 function beep() {
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
   osc.frequency.value = 800;
-  gain.gain.value = 0.2;
-  osc.connect(gain);
-  gain.connect(ctx.destination);
+  osc.connect(ctx.destination);
   osc.start();
-  osc.stop(ctx.currentTime + 0.12);
+  osc.stop(ctx.currentTime + 0.1);
 }
 
 /* ADD TO CART */
@@ -131,105 +121,114 @@ function addToCart(item) {
   render();
 }
 
-/* MANUAL ADD (STRICT) */
+/* MANUAL ADD */
 function addManual() {
-  const nameRaw = m_name.value.trim();
-  const priceRaw = m_price.value.trim();
-  const qtyRaw = m_qty.value.trim();
+  const name = m_name.value.trim();
+  const price = parseFloat(m_price.value);
+  const qty = parseInt(m_qty.value);
 
-  const price = parseFloat(priceRaw);
-  const qty = parseInt(qtyRaw);
-
-  if (
-    nameRaw === "" ||
-    priceRaw === "" || isNaN(price) || price <= 0 ||
-    qtyRaw === "" || isNaN(qty) || qty <= 0
-  ) {
+  if (!name || isNaN(price) || price <= 0 || isNaN(qty) || qty <= 0) {
     alert("Fill out all item fields correctly.");
     return;
   }
 
-  addToCart({
-    id: "manual-" + nameRaw.toLowerCase(),
-    name: nameRaw,
-    price: price,
-    qty: qty
-  });
-
+  addToCart({ id: "manual-" + name.toLowerCase(), name, price, qty });
   beep();
 
   m_name.value = "";
   m_price.value = "";
   m_qty.value = 1;
-
   bootstrap.Modal.getInstance(addModal).hide();
 }
 
-/* RENDER CART */
+/* RENDER */
 function render() {
-  let html = "", total = 0;
+  let html = "";
+  let total = 0;
 
   cart.forEach((i, index) => {
-    const price = isNaN(i.price) ? 0 : i.price;
-    const qty = isNaN(i.qty) ? 0 : i.qty;
-    const sub = price * qty;
+    const sub = i.price * i.qty;
     total += sub;
 
     html += `
       <tr>
         <td>${i.name}</td>
         <td>
-          <input type="number" min="1" value="${qty}"
+          <input type="number" min="1" value="${i.qty}"
             class="form-control form-control-sm"
-            onchange="cart[${index}].qty=parseInt(this.value)||1;render()">
+            onchange="updateQty(${index}, this.value)">
         </td>
-        <td>₱${price.toFixed(2)}</td>
+        <td>₱${i.price.toFixed(2)}</td>
         <td>₱${sub.toFixed(2)}</td>
         <td>
-          <button class="btn btn-danger btn-sm"
-            onclick="cart.splice(${index},1);render()">X</button>
+          <button class="btn btn-danger btn-sm" onclick="removeItem(${index})">X</button>
         </td>
       </tr>`;
   });
 
-  cartEl = document.getElementById("cart");
   cartEl.innerHTML = html;
-  totalEl = document.getElementById("total");
-  totalEl.innerText = total.toFixed(2);
+  document.getElementById("total").innerText = total.toFixed(2);
 }
 
-/* BARCODE SCANNER */
+function updateQty(index, value) {
+  const qty = parseInt(value);
+  if (qty > 0) {
+    cart[index].qty = qty;
+    render();
+  }
+}
+
+function removeItem(index) {
+  cart.splice(index, 1);
+  render();
+}
+
+/* SCANNER (RELIABLE CONFIG) */
 function startScanner() {
-  if (scannerInstance) scannerInstance.stop();
+  if (scannerInstance) scannerInstance.stop().catch(()=>{});
 
   scannerInstance = new Html5Qrcode("reader");
+
   scannerInstance.start(
     { facingMode: "environment" },
     {
-      fps: 10,
+      fps: 15,
+      qrbox: { width: 300, height: 150 },
       formatsToSupport: [
         Html5QrcodeSupportedFormats.EAN_13,
         Html5QrcodeSupportedFormats.UPC_A,
         Html5QrcodeSupportedFormats.CODE_128
       ]
     },
-    code => {
-      scannerInstance.stop();
+    (code) => {
+      if (scanLock) return;
+      scanLock = true;
+
       fetch("scan.php", {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {"Content-Type":"application/x-www-form-urlencoded"},
         body: "barcode=" + encodeURIComponent(code)
       })
       .then(r => r.json())
       .then(d => {
-        if (!d.success) return;
+        if (!d.success) {
+          alert("Item not found");
+          return;
+        }
+
         addToCart({
           id: d.product.id,
           name: d.product.name,
           price: parseFloat(d.product.price),
           qty: 1
         });
+
         beep();
+      })
+      .finally(() => {
+        setTimeout(() => {
+          scanLock = false;
+        }, 600);
       });
     }
   );
@@ -237,55 +236,33 @@ function startScanner() {
 
 /* PAY */
 function pay() {
-  const cashRaw = cash.value.trim();
-  const cashVal = parseFloat(cashRaw);
+  const cashVal = parseFloat(cash.value);
+  if (!cart.length) return alert("Cart empty");
+  if (isNaN(cashVal)) return alert("Invalid cash");
 
-  if (cart.length === 0) {
-    alert("Cart is empty.");
-    return;
-  }
-
-  if (cashRaw === "" || isNaN(cashVal) || cashVal <= 0) {
-    alert("Enter valid cash amount.");
-    return;
-  }
-
-  let total = 0;
-  cart.forEach(i => total += i.price * i.qty);
-
-  if (cashVal < total) {
-    alert("Insufficient cash.");
-    return;
-  }
+  let total = cart.reduce((s,i)=>s+i.price*i.qty,0);
+  if (cashVal < total) return alert("Insufficient cash");
 
   fetch("pay.php", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({ cart, cash: cashVal })
   })
-  .then(r => r.json())
-  .then(res => {
-    if (!res.success) return;
-
-    toast_total.innerText = res.total;
-    toast_cash.innerText = res.cash;
-    toast_change.innerText = res.change;
-
-    new bootstrap.Modal(paymentToast, {
-      backdrop: "static",
-      keyboard: false
-    }).show();
+  .then(r=>r.json())
+  .then(res=>{
+    if(!res.success) return;
+    toast_total.innerText=res.total;
+    toast_cash.innerText=res.cash;
+    toast_change.innerText=res.change;
+    new bootstrap.Modal(paymentToast,{backdrop:"static"}).show();
   });
 }
 
-/* CLOSE + RESET */
 function closePaymentToast() {
-  cart = [];
+  cart=[];
   render();
-  cash.value = "";
-
-  const modal = bootstrap.Modal.getInstance(paymentToast);
-  if (modal) modal.hide();
+  cash.value="";
+  bootstrap.Modal.getInstance(paymentToast).hide();
 }
 </script>
 
